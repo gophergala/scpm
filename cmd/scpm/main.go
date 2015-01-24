@@ -28,12 +28,12 @@ var (
 		},
 		cli.StringFlag{
 			Name:  "in",
-			Value: "README.md",
+			Value: "../../README.md",
 			Usage: "/path/to/file or folder",
 		},
 		cli.StringSliceFlag{
 			Name:  "path",
-			Value: &cli.StringSlice{"gronpipmaster.ru:/tmp/readme.md"},
+			Value: &cli.StringSlice{"gronpipmaster.ru:/tmp/ss/readme.md"},
 			Usage: "user@example.com:/path/to",
 		},
 	}
