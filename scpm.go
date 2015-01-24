@@ -122,7 +122,9 @@ func (h *Host) cp(path string) error {
 	//create remote dir
 	dir := filepath.Dir(path)
 	if err := h.exec(fmt.Sprintf(cmdStat, dir)); err != nil {
-		return h.mkdir(dir)
+		if err := h.mkdir(dir); err != nil {
+			return err
+		}
 	}
 	//open fd file
 	f, err := os.Open(h.Input)
