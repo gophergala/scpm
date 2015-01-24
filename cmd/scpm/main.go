@@ -1,6 +1,7 @@
 package main
 
 import (
+	"fmt"
 	"github.com/codegangsta/cli"
 	"github.com/gophergala/scpm"
 	"log"
@@ -33,7 +34,7 @@ var (
 		},
 		cli.StringSliceFlag{
 			Name:  "path",
-			Value: &cli.StringSlice{"gronpipmaster.ru:/tmp/ss/readme.md"},
+			Value: &cli.StringSlice{"gronpipmaster.ru:/tmp/ss/readme.md", "gronpipmaster.ru:/tmp/ss/readme.md"},
 			Usage: "user@example.com:/path/to",
 		},
 	}
@@ -55,7 +56,6 @@ func main() {
 }
 
 func action(ctx *cli.Context) {
-	log.Println("Starting.")
 	hosts := []scpm.Host{}
 	for _, host := range ctx.GlobalStringSlice("path") {
 		h, err := scpm.NewHost(host, ctx.GlobalString("identity"), ctx.GlobalInt("port"))
@@ -86,10 +86,9 @@ func action(ctx *cli.Context) {
 	for {
 		select {
 		case <-osSigs:
-			log.Println("Quit signal, wait stop.")
+			fmt.Println("Quit signal, wait stop.")
 			quit <- true //send signal stop app
 		case <-quit:
-			log.Println("Exit.")
 			return
 		}
 	}

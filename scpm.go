@@ -70,6 +70,12 @@ func NewHost(host string, key string, port int) (h Host, err error) {
 	return
 }
 
+func (h Host) String() string {
+	str := fmt.Sprintf("%s ", h.Addr+":"+h.Output)
+	//TODO fixed str size if > 50
+	return str
+}
+
 func (h *Host) Auth() error {
 	var err error
 	if len(h.Identity.Auth) == 0 {
@@ -153,6 +159,7 @@ func (h *Host) cp(path string) error {
 	// create bar
 	bar := pb.New(int(info.Size())).SetUnits(pb.U_BYTES).SetRefreshRate(time.Millisecond * 10)
 	bar.ShowSpeed = true
+	bar.Prefix(h.String())
 	bar.Start()
 	defer bar.Finish()
 
@@ -180,6 +187,7 @@ func New(hosts []Host, timeout time.Duration, path string) (scp *Scp, err error)
 	if err != nil {
 		return
 	}
+	fmt.Println("Start copy", absPath)
 	if len(hosts) == 0 {
 		err = errors.New("hosts is nil")
 		return
