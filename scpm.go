@@ -3,8 +3,7 @@ package scpm
 import (
 	"errors"
 	"fmt"
-	// "github.com/cheggaaa/pb"
-	// "github.com/sethgrid/multibar"
+	"github.com/gronpipmaster/pb"
 	"golang.org/x/crypto/ssh"
 	"io"
 	"io/ioutil"
@@ -71,7 +70,7 @@ func NewHost(host string, key string, port int) (h *Host, err error) {
 }
 
 func (h Host) String() string {
-	str := fmt.Sprintf("%s ", h.Addr+":"+h.Output)
+	str := fmt.Sprintf("%s ", h.Addr+" "+h.Output)
 	//TODO fixed str size if > 50
 	return str
 }
@@ -83,14 +82,16 @@ func (h *Host) Auth() error {
 	} else {
 		h.Client, err = ssh.Dial("tcp", h.Addr, h.Identity)
 		if err != nil {
+			// "TODO dialog password")
 			return err
 		}
 	}
 	return nil
 }
 
-func (h *Host) Copy(tree *Tree, wg *sync.WaitGroup) {
+func (h *Host) Copy(tree *Tree, wg *sync.WaitGroup, bar *pb.ProgressBar) {
 	defer func() {
+		bar.Finish()
 		wg.Done()
 	}()
 	if err := h.Auth(); err != nil {
@@ -100,14 +101,10 @@ func (h *Host) Copy(tree *Tree, wg *sync.WaitGroup) {
 	for _, file := range tree.Files {
 		in := file.Dir + string(os.PathSeparator) + file.Info.Name()
 		out := strings.Replace(in, tree.BaseDir, h.Output, -1)
-		log.Println(in, out)
-		if err := h.cp(in, out); err != nil {
+		if err := h.cp(in, out, bar); err != nil && err != io.EOF {
 			log.Println(err)
 		}
 	}
-	// if err := h.sess.Wait(); err != nil {
-	// 	log.Println("sess.wait", err)
-	// }
 }
 
 func (h *Host) exec(cmd string) error {
@@ -127,7 +124,7 @@ const (
 )
 
 //remote cp
-func (h *Host) cp(in, out string) error {
+func (h *Host) cp(in, out string, bar *pb.ProgressBar) error {
 	var err error
 	//create remote dir
 	dir := filepath.Dir(out)
@@ -156,8 +153,8 @@ func (h *Host) cp(in, out string) error {
 	if err = h.sess.Start(fmt.Sprintf(cmdCat, out)); err != nil {
 		return err
 	}
-	// writer := io.MultiWriter(dest, bar)
-	_, err = io.Copy(dest, f)
+	writer := io.MultiWriter(dest, bar)
+	_, err = io.Copy(writer, f)
 	return err
 }
 
@@ -167,14 +164,13 @@ func (h *Host) mkdir(dir string) error {
 }
 
 type Scp struct {
-	hosts   []*Host
-	timeout time.Duration
-	tree    *Tree
-	wg      *sync.WaitGroup
-	done    chan bool
+	hosts []*Host
+	tree  *Tree
+	wg    *sync.WaitGroup
+	done  chan bool
 }
 
-func New(hosts []*Host, timeout time.Duration, path string) (scp *Scp, err error) {
+func New(hosts []*Host, path string) (scp *Scp, err error) {
 	if strings.Index(path, "~") != -1 {
 		path = strings.Replace(path, "~", homeFolder, -1)
 	}
@@ -189,7 +185,6 @@ func New(hosts []*Host, timeout time.Duration, path string) (scp *Scp, err error
 	}
 	scp = new(Scp)
 	scp.hosts = hosts
-	scp.timeout = timeout
 	scp.tree, err = NewTree(absPath)
 	if err != nil {
 		return
@@ -200,18 +195,23 @@ func New(hosts []*Host, timeout time.Duration, path string) (scp *Scp, err error
 }
 
 func (s *Scp) Run(quit chan bool) {
+	pool := &pb.Pool{}
 	for _, host := range s.hosts {
 		s.wg.Add(1)
-		go host.Copy(s.tree, s.wg)
+		bar := pb.New(int(s.tree.Size)).SetUnits(pb.U_BYTES).SetRefreshRate(time.Millisecond * 10)
+		bar.ShowSpeed = true
+		bar.Prefix(host.String())
+		pool.Add(bar)
+		go host.Copy(s.tree, s.wg, bar)
 	}
+	pool.Start()
 	go func() {
 		s.wg.Wait()
+		time.Sleep(10 * time.Millisecond)
 		s.done <- true
 	}()
 	for {
 		select {
-		case <-quit:
-			quit <- true
 		case <-s.done:
 			quit <- true
 		}

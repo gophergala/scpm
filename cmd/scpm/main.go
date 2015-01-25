@@ -4,21 +4,14 @@ import (
 	"fmt"
 	"github.com/codegangsta/cli"
 	"github.com/gophergala/scpm"
-	"log"
+	// "log"
 	"os"
-	"os/signal"
 	"runtime"
-	"syscall"
-	"time"
 )
 
 var (
 	version     string
 	globalFlags = []cli.Flag{
-		cli.DurationFlag{
-			Name:  "timeout, t",
-			Value: 59 * time.Second,
-		},
 		cli.IntFlag{
 			Name:  "port, p",
 			Value: 22,
@@ -29,12 +22,12 @@ var (
 		},
 		cli.StringFlag{
 			Name:  "in",
-			Value: "~/gocode/pkg/linux_arm",
-			Usage: "/path/to/file or folder",
+			Value: "",
+			Usage: "/path/to/file or /path/to/folder",
 		},
 		cli.StringSliceFlag{
 			Name:  "path",
-			Value: &cli.StringSlice{"gronpipmaster.ru:/tmp/ss0", "gronpipmaster.ru:/tmp/ss1"},
+			Value: &cli.StringSlice{},
 			Usage: "user@example.com:/path/to",
 		},
 	}
@@ -42,7 +35,6 @@ var (
 
 func main() {
 	runtime.GOMAXPROCS(runtime.NumCPU())
-	log.SetFlags(log.LstdFlags | log.Lshortfile)
 	app := cli.NewApp()
 	app.Name = "scpm"
 	// app.EnableBashCompletion = true
@@ -60,36 +52,33 @@ func action(ctx *cli.Context) {
 	for _, host := range ctx.GlobalStringSlice("path") {
 		h, err := scpm.NewHost(host, ctx.GlobalString("identity"), ctx.GlobalInt("port"))
 		if err != nil {
-			log.Fatalln(err)
+			fatalln(err)
 		}
 		hosts = append(hosts, h)
 	}
-
+	if len(ctx.GlobalString("in")) == 0 {
+		fatalln("Field --in required.")
+	}
 	scp, err := scpm.New(
 		hosts,
-		ctx.GlobalDuration("timeout"),
 		ctx.GlobalString("in"),
 	)
 	if err != nil {
-		log.Fatalln(err)
+		fatalln(err)
 	}
 	//Create chanels for wait quit signal
 	quit := make(chan bool)
-	//Create chanel for wait system signals
-	osSigs := make(chan os.Signal, 1)
-	//Kill - 3
-	signal.Notify(osSigs, syscall.SIGQUIT)
-	//Ctrl + C
-	signal.Notify(osSigs, os.Interrupt)
 	//Init and run
 	go scp.Run(quit)
 	for {
 		select {
-		case <-osSigs:
-			fmt.Println("Quit signal, wait stop.")
-			quit <- true //send signal stop app
 		case <-quit:
-			return
+			os.Exit(0)
 		}
 	}
+}
+
+func fatalln(i ...interface{}) {
+	fmt.Println(i...)
+	os.Exit(1)
 }
