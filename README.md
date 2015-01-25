@@ -25,3 +25,13 @@ scpm --in="/path/to" \
     --path="user@server4.com:/path/to"
 
 ```
+
+## Features
+1. Copy once file to once server
+2. Copy once file to multiple servers
+3. Recursive copy folder to multiple server
+4. Multi progress bar
+4. Support custom identity key, system identity, or plain password
+
+## TODO
+1. Flag config.json
