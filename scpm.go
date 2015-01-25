@@ -1,6 +1,7 @@
 package scpm
 
 import (
+	"bufio"
 	"errors"
 	"fmt"
 	"github.com/gronpipmaster/pb"
@@ -77,12 +78,11 @@ func (h Host) String() string {
 
 func (h *Host) Auth() error {
 	var err error
-	if len(h.Identity.Auth) == 0 {
-		return errors.New("TODO dialog password")
-	} else {
+	h.Client, err = ssh.Dial("tcp", h.Addr, h.Identity)
+	if err != nil {
+		h.Identity.Auth = append(h.Identity.Auth, ssh.Password(dialogPassword(h.Addr)))
 		h.Client, err = ssh.Dial("tcp", h.Addr, h.Identity)
 		if err != nil {
-			// "TODO dialog password")
 			return err
 		}
 	}
@@ -94,10 +94,6 @@ func (h *Host) Copy(tree *Tree, wg *sync.WaitGroup, bar *pb.ProgressBar) {
 		bar.Finish()
 		wg.Done()
 	}()
-	if err := h.Auth(); err != nil {
-		log.Println("h.Auth", err)
-		return
-	}
 	for _, file := range tree.Files {
 		in := file.Dir + string(os.PathSeparator) + file.Info.Name()
 		out := strings.Replace(in, tree.BaseDir, h.Output, -1)
@@ -197,6 +193,10 @@ func New(hosts []*Host, path string) (scp *Scp, err error) {
 func (s *Scp) Run(quit chan bool) {
 	pool := &pb.Pool{}
 	for _, host := range s.hosts {
+		if err := host.Auth(); err != nil {
+			fmt.Println("Auth err:", err)
+			continue
+		}
 		s.wg.Add(1)
 		bar := pb.New(int(s.tree.Size)).SetUnits(pb.U_BYTES).SetRefreshRate(time.Millisecond * 10)
 		bar.ShowSpeed = true
@@ -256,4 +256,12 @@ func (t *Tree) Scan(path string, fileInfo os.FileInfo, errInp error) (err error)
 	t.Files = append(t.Files, File{Info: fileInfo, Dir: filepath.Dir(path)})
 	t.Size += fileInfo.Size()
 	return
+}
+
+func dialogPassword(addr string) (pass string) {
+	reader := bufio.NewReader(os.Stdin)
+	fmt.Println(addr)
+	fmt.Print("Enter Password: ")
+	pass, _ = reader.ReadString('\n')
+	return strings.TrimSpace(pass)
 }
