@@ -29,12 +29,12 @@ var (
 		},
 		cli.StringFlag{
 			Name:  "in",
-			Value: "../../README.md",
+			Value: "~/gocode/pkg/linux_arm",
 			Usage: "/path/to/file or folder",
 		},
 		cli.StringSliceFlag{
 			Name:  "path",
-			Value: &cli.StringSlice{"gronpipmaster.ru:/tmp/ss/readme.md", "gronpipmaster.ru:/tmp/ss/readme.md"},
+			Value: &cli.StringSlice{"gronpipmaster.ru:/tmp/ss0", "gronpipmaster.ru:/tmp/ss1"},
 			Usage: "user@example.com:/path/to",
 		},
 	}
@@ -56,7 +56,7 @@ func main() {
 }
 
 func action(ctx *cli.Context) {
-	hosts := []scpm.Host{}
+	hosts := []*scpm.Host{}
 	for _, host := range ctx.GlobalStringSlice("path") {
 		h, err := scpm.NewHost(host, ctx.GlobalString("identity"), ctx.GlobalInt("port"))
 		if err != nil {
@@ -81,7 +81,7 @@ func action(ctx *cli.Context) {
 	signal.Notify(osSigs, syscall.SIGQUIT)
 	//Ctrl + C
 	signal.Notify(osSigs, os.Interrupt)
-	//Init and run gc
+	//Init and run
 	go scp.Run(quit)
 	for {
 		select {

@@ -1,10 +1,10 @@
 package scpm
 
 import (
-	// "bytes"
 	"errors"
 	"fmt"
-	"github.com/cheggaaa/pb"
+	// "github.com/cheggaaa/pb"
+	// "github.com/sethgrid/multibar"
 	"golang.org/x/crypto/ssh"
 	"io"
 	"io/ioutil"
@@ -14,21 +14,21 @@ import (
 	"strings"
 	"sync"
 	"time"
-	// "golang.org/x/crypto/ssh/agent"
 )
+
+var homeFolder = os.Getenv("HOME")
 
 type Host struct {
 	User     string
 	Addr     string
-	Input    string
 	Output   string
 	Client   *ssh.Client
 	sess     *ssh.Session
 	Identity *ssh.ClientConfig
 }
 
-func NewHost(host string, key string, port int) (h Host, err error) {
-	h = Host{}
+func NewHost(host string, key string, port int) (h *Host, err error) {
+	h = new(Host)
 	if strings.Index(host, "@") == -1 {
 		h.User = os.Getenv("LOGNAME")
 	} else {
@@ -38,16 +38,16 @@ func NewHost(host string, key string, port int) (h Host, err error) {
 	}
 	if strings.Index(host, ":") == -1 {
 		err = errors.New("host incorrect")
-		return h, err
+		return
 	}
 	arrHost := strings.Split(host, ":")
 	h.Addr = arrHost[0] + ":" + fmt.Sprint(port)
 	h.Output = arrHost[1]
 	keys := []string{
 		key,
-		os.Getenv("HOME") + "/.ssh/id_rsa",
-		os.Getenv("HOME") + "/.ssh/id_dsa",
-		os.Getenv("HOME") + "/.ssh/id_ecdsa",
+		homeFolder + "/.ssh/id_rsa",
+		homeFolder + "/.ssh/id_dsa",
+		homeFolder + "/.ssh/id_ecdsa",
 	}
 	h.Identity = &ssh.ClientConfig{User: h.User}
 	for _, k := range keys {
@@ -89,8 +89,7 @@ func (h *Host) Auth() error {
 	return nil
 }
 
-func (h *Host) Copy(file string, wg *sync.WaitGroup) {
-	h.Input = file
+func (h *Host) Copy(tree *Tree, wg *sync.WaitGroup) {
 	defer func() {
 		wg.Done()
 	}()
@@ -98,8 +97,13 @@ func (h *Host) Copy(file string, wg *sync.WaitGroup) {
 		log.Println("h.Auth", err)
 		return
 	}
-	if err := h.cp(h.Output); err != nil {
-		log.Println("h.cp", err)
+	for _, file := range tree.Files {
+		in := file.Dir + string(os.PathSeparator) + file.Info.Name()
+		out := strings.Replace(in, tree.BaseDir, h.Output, -1)
+		log.Println(in, out)
+		if err := h.cp(in, out); err != nil {
+			log.Println(err)
+		}
 	}
 	// if err := h.sess.Wait(); err != nil {
 	// 	log.Println("sess.wait", err)
@@ -117,23 +121,24 @@ func (h *Host) exec(cmd string) error {
 }
 
 const (
-	cmdStat  string = "stat %s"
 	cmdCat   string = "cat > %s"
+	cmdStat  string = "stat %s"
 	cmdMkDir string = "mkdir -p %s"
 )
 
 //remote cp
-func (h *Host) cp(path string) error {
+func (h *Host) cp(in, out string) error {
 	var err error
 	//create remote dir
-	dir := filepath.Dir(path)
+	dir := filepath.Dir(out)
+	//check folder exists
 	if err := h.exec(fmt.Sprintf(cmdStat, dir)); err != nil {
 		if err := h.mkdir(dir); err != nil {
 			return err
 		}
 	}
 	//open fd file
-	f, err := os.Open(h.Input)
+	f, err := os.Open(in)
 	if err != nil {
 		return err
 	}
@@ -148,24 +153,11 @@ func (h *Host) cp(path string) error {
 	if err != nil {
 		return err
 	}
-	if err = h.sess.Start(fmt.Sprintf(cmdCat, path)); err != nil {
+	if err = h.sess.Start(fmt.Sprintf(cmdCat, out)); err != nil {
 		return err
 	}
-
-	info, err := f.Stat()
-	if err != nil {
-		return err
-	}
-	// create bar
-	bar := pb.New(int(info.Size())).SetUnits(pb.U_BYTES).SetRefreshRate(time.Millisecond * 10)
-	bar.ShowSpeed = true
-	bar.Prefix(h.String())
-	bar.Start()
-	defer bar.Finish()
-
-	writer := io.MultiWriter(dest, bar)
-
-	_, err = io.Copy(writer, f)
+	// writer := io.MultiWriter(dest, bar)
+	_, err = io.Copy(dest, f)
 	return err
 }
 
@@ -175,14 +167,17 @@ func (h *Host) mkdir(dir string) error {
 }
 
 type Scp struct {
-	hosts   []Host
+	hosts   []*Host
 	timeout time.Duration
-	input   string
+	tree    *Tree
 	wg      *sync.WaitGroup
 	done    chan bool
 }
 
-func New(hosts []Host, timeout time.Duration, path string) (scp *Scp, err error) {
+func New(hosts []*Host, timeout time.Duration, path string) (scp *Scp, err error) {
+	if strings.Index(path, "~") != -1 {
+		path = strings.Replace(path, "~", homeFolder, -1)
+	}
 	absPath, err := filepath.Abs(path)
 	if err != nil {
 		return
@@ -195,7 +190,10 @@ func New(hosts []Host, timeout time.Duration, path string) (scp *Scp, err error)
 	scp = new(Scp)
 	scp.hosts = hosts
 	scp.timeout = timeout
-	scp.input = absPath
+	scp.tree, err = NewTree(absPath)
+	if err != nil {
+		return
+	}
 	scp.wg = new(sync.WaitGroup)
 	scp.done = make(chan bool)
 	return
@@ -204,7 +202,7 @@ func New(hosts []Host, timeout time.Duration, path string) (scp *Scp, err error)
 func (s *Scp) Run(quit chan bool) {
 	for _, host := range s.hosts {
 		s.wg.Add(1)
-		go host.Copy(s.input, s.wg)
+		go host.Copy(s.tree, s.wg)
 	}
 	go func() {
 		s.wg.Wait()
@@ -218,4 +216,44 @@ func (s *Scp) Run(quit chan bool) {
 			quit <- true
 		}
 	}
+}
+
+type Tree struct {
+	BaseDir string
+	Size    int64
+	Files   []File
+}
+
+type File struct {
+	Info os.FileInfo
+	Dir  string
+}
+
+func NewTree(path string) (t *Tree, err error) {
+	t = new(Tree)
+	t.BaseDir = filepath.Dir(path)
+	info, err := os.Stat(path)
+	if err != nil {
+		return
+	}
+	if info.IsDir() {
+		err = filepath.Walk(path, t.Scan)
+		return
+	}
+	t.Files = append(t.Files, File{Info: info, Dir: t.BaseDir})
+	t.Size = info.Size()
+	return
+}
+
+func (t *Tree) Scan(path string, fileInfo os.FileInfo, errInp error) (err error) {
+	if errInp != nil {
+		log.Println(errInp)
+		return nil
+	}
+	if fileInfo.IsDir() {
+		return nil
+	}
+	t.Files = append(t.Files, File{Info: fileInfo, Dir: filepath.Dir(path)})
+	t.Size += fileInfo.Size()
+	return
 }
